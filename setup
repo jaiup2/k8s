@@ -1,0 +1,82 @@
+#!/bin/bash
+red="\e[31m"
+yellow="\e[33m"
+end="\e[0m"
+function overlay(){
+modprobe overlay
+modprobe br_netfilter
+tee /etc/sysctl.d/kubernetes.conf<<EOF
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+net.ipv4.ip_forward = 1
+EOF
+sysctl --system
+}
+
+function kubea(){
+tee /etc/yum.repos.d/kubernetes.repo<<EOF
+[kubernetes]
+name=Kubernetes
+baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+EOF
+}
+
+function install(){
+yum clean all &&  yum -y makecache
+yum -y install epel-release git curl wget kubelet kubeadm kubectl --disableexcludes=kubernetes
+systemctl start kubelet
+systemctl enable kubelet
+}
+
+function crio(){
+OS=CentOS_7
+VERSION=1.22
+curl -L -o /etc/yum.repos.d/devel:kubic:libcontainers:stable.repo https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/$OS/devel:kubic:libcontainers:stable.repo
+curl -L -o /etc/yum.repos.d/devel:kubic:libcontainers:stable:cri-o:$VERSION.repo https://download.opensuse.org/repositories/devel:kubic:libcontainers:stable:cri-o:$VERSION/$OS/devel:kubic:libcontainers:stable:cri-o:$VERSION.repo
+#Install CRI-O
+yum install cri-o -y
+# Start and enable Service
+systemctl daemon-reload
+systemctl start crio
+systemctl enable crio
+}
+
+function dir(){
+mkdir -p $HOME/.kube
+sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo chown $(id -u):$(id -g) $HOME/.kube/config
+}
+
+
+printf "${red}"
+figlet KS8- TOOL
+printf "${end}"
+yum remove docker-ce docker-ce-cli containerd.io
+setenforce 0 &> /dev/null
+sed -i 's/^SELINUX=.*/SELINUX=disabled/g' /etc/selinux/config
+sed -i '/swap / s/^\(.*\)$/#\1/g' /etc/fstab
+swapoff -a
+printf "Overlay step\n"
+overlay &> /dev/null
+printf "Overlay Successful\n"
+printf "Kubea step\n"
+kubea &> /dev/null
+printf "Kuba successful\n"
+printf "Install Step\n"
+install &> /dev/null
+printf "install successful\n"
+printf "crio step\n"
+crio &> /dev/null 
+printf "crio successful\n"
+printf "Pulling images\n"
+kubeadm config images pull &> /dev/null
+printf "Images pulled successfully\n"
+dir
+kubeadm init
+printf "${yellow}Kubernetics cluster installed successfully${end}\n"
+
+exit 0
